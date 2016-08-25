@@ -1,0 +1,149 @@
+#include "vslc.h"
+
+#define MIN(a,b) (((a)<(b)) ? (a):(b))
+static const char *record[6] = {
+    "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
+};
+
+static void
+generate_stringtable ( void )
+{
+    /* These can be used to emit numbers, strings and a run-time
+     * error msg. from main
+     */ 
+    puts ( ".section .rodata" );
+    puts ( "intout: .string \"\%ld \"" );
+    puts ( "strout: .string \"\%s \"" );
+    puts ( "errout: .string \"Wrong number of arguments\"" );
+
+    for (int i = 0; i < stringc; i++) {
+        printf ("STR%i: %s\n", i, string_list[i]);
+    }
+    printf( "\n" );
+}
+
+static void
+generate_globvars ( size_t n_globals, symbol_t **global_list )
+{
+    puts ( ".section .data" );
+    for ( size_t i=0; i<n_globals; i++ )
+        if ( global_list[i]->type == SYM_GLOBAL_VAR )
+	  printf ( "_%s: .zero 8\n", global_list[i]->name);
+    
+    printf( "\n" );
+}
+
+static void
+generate_main ( symbol_t *first )
+{
+    puts ( ".globl main" );
+    puts ( ".section .text" );
+    puts ( "main:" );
+    puts ( "\tpushq %rbp" );
+    puts ( "\tmovq %rsp, %rbp" );
+
+    puts ( "\tsubq $1, %rdi" );
+    printf ( "\tcmpq\t$%zu,%%rdi\n", first->nparms );
+    puts ( "\tjne ABORT" );
+    puts ( "\tcmpq $0, %rdi" );
+    puts ( "\tjz SKIP_ARGS" );
+
+    puts ( "\tmovq %rdi, %rcx" );
+    printf ( "\taddq $%zu, %%rsi\n", 8*first->nparms );
+    puts ( "PARSE_ARGV:" );
+    puts ( "\tpushq %rcx" );
+    puts ( "\tpushq %rsi" );
+
+    puts ( "\tmovq (%rsi), %rdi" );
+    puts ( "\tmovq $0, %rsi" );
+    puts ( "\tmovq $10, %rdx" );
+    puts ( "\tcall strtol" );
+
+    /*  Now a new argument is an integer in rax */
+    puts ( "\tpopq %rsi" );
+    puts ( "\tpopq %rcx" );
+    puts ( "\tpushq %rax" );
+    puts ( "\tsubq $8, %rsi" );
+    puts ( "\tloop PARSE_ARGV" );
+
+    /* Now the arguments are in order on stack */
+    for ( int arg=0; arg<MIN(6,first->nparms); arg++ )
+        printf ( "\tpopq\t%s\n", record[arg] );
+
+    puts ( "SKIP_ARGS:" );
+    printf ( "\tcall\t_%s\n", first->name );
+    puts ( "\tjmp END" );
+    puts ( "ABORT:" );
+    puts ( "\tmovq $errout, %rdi" );
+    puts ( "\tcall puts" );
+
+    puts ( "END:" );
+    puts ( "\tmovq %rax, %rdi" );
+    puts ( "\tcall exit" );
+}
+
+static void
+generate_subtree ( node_t *root )
+{
+    if ( root == NULL ) {
+        return;
+    }
+    
+    for ( uint64_t i=0; i<root->n_children; i++ )
+        generate_subtree ( &root->children[i], root->children[i] );
+
+    switch ( root->type ) {
+        case EXPRESSION:
+	    switch ( root->n_children ) {
+	        case 1:
+		    if ( root->children[0]->type == NUMBER_DATA ) {
+                        
+                    }
+                    else if ( root->children[0]->type == IDENTIFIER_DATA ) {
+		        
+                    }
+		    else if ( root->children[0]->type == EXPRESSION ) {
+		        
+                    }
+                    break;
+	        case 2:
+		  
+	    }
+    }
+}
+
+static void
+generate_func ( symbol_t *first )
+{
+    printf ( "_%s:\n", first->name );
+    puts ( "\tpushq %rbp" );
+    puts ( "\tmovq %rsp, %rbp" );
+
+    generate_subtree ( first->node );
+    
+    puts ( "\tleave" );
+    puts ( "\tret" );
+}
+
+void
+generate_program ( void )
+{
+    size_t n_globals = tlhash_size(global_names);
+    symbol_t *global_list[n_globals];
+    tlhash_values ( global_names, (void **)&global_list );
+
+    generate_stringtable();
+    generate_globvars( n_globals, &global_list );
+
+    int mainfunc = 0;
+    for ( size_t i=0; i<n_globals; i++ ) {
+        if ( global_list[i]->type == SYM_FUNCTION ) {
+	    if ( mainfunc == 0 ) {
+	        generate_main( global_list[i] );
+	        mainfunc = 1;
+	    }
+	    generate_func( global_list[i] );
+	}
+    }
+    
+}
